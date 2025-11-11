@@ -1,8 +1,49 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 
 export default function App() {
   const [view, setView] = useState("dashboard");
   const [selected, setSelected] = useState("Strengths Journal");
+
+  // === personas ===
+  const PERSONAS = [
+    "Sarah Thompson",
+    "Michael Reyes",
+    "Aisha Khan",
+    "Daniel Park",
+    "Elena Garcia",
+    "Emily Chen",
+    "Marcus Green",
+  ];
+  const [selectedPersona, setSelectedPersona] = useState("Aisha Khan");
+
+  // === call local server with API + AI state ===
+  const API_BASE = "http://localhost:8000";
+  const [hints, setHints] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  // === map assignment titles -> exact questions/prompts ===
+  const questionByTitle = {
+    "Strengths Journal":
+      "Write 3 moments this week that energized you. Tag skills you used.",
+    "STAR Story: Relocation Win":
+      "Draft a STAR story that turns a challenge into a strength.",
+    "Resume Transferables":
+      "Reframe 3 experiences into resume bullets with impact.",
+    "Micro-Network Task":
+      "Send 1 informational-interview request using our template.",
+  };
+
+  // ===  keep the visible prompt in sync with selected assignment
+  const [currentPrompt, setCurrentPrompt] = useState(
+    questionByTitle["Strengths Journal"]
+  );
+
+  useEffect(() => {
+    setCurrentPrompt(
+      questionByTitle[selected] || questionByTitle["Strengths Journal"]
+    );
+  }, [selected]);
 
   const assignments = [
     {
@@ -39,6 +80,36 @@ export default function App() {
     },
   ];
 
+  // === call API with persona + question
+  async function getAiHint() {
+    // no AI needed for Micro-Network Task
+    if (selected === "Micro-Network Task") return;
+
+    setLoading(true);
+    setError("");
+    setHints([]);
+    try {
+      const res = await fetch(`${API_BASE}/ai-hint`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          question:
+            questionByTitle[selected] || questionByTitle["Strengths Journal"],
+          resume_name: selectedPersona, // from dropdown
+          meeting_notes: "", // optional for now
+          // model: "phi3:mini",
+        }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      setHints(Array.isArray(data.hints) ? data.hints : []);
+    } catch (e) {
+      setError(e.message || "AI hint failed");
+    } finally {
+      setLoading(false);
+    }
+  }
+
   return (
     <div className="p-6 space-y-8 bg-white">
       {/* Header */}
@@ -46,7 +117,24 @@ export default function App() {
         <div>
           <h1 className="text-2xl font-bold">Homework Hub</h1>
         </div>
+
         <div className="flex items-center gap-3">
+          {/* === NEW: Persona dropdown === */}
+          <div className="text-sm">
+            <label className="mr-2 text-gray-600">Persona:</label>
+            <select
+              className="bg-gray-100 px-3 py-1 rounded-xl"
+              value={selectedPersona}
+              onChange={(e) => setSelectedPersona(e.target.value)}
+            >
+              {PERSONAS.map((p) => (
+                <option key={p} value={p}>
+                  {p}
+                </option>
+              ))}
+            </select>
+          </div>
+
           <div className="text-sm bg-gray-100 px-3 py-1 rounded-xl">
             Stage: <span className="font-semibold">Confidence → Career</span>
           </div>
@@ -119,6 +207,9 @@ export default function App() {
                       onClick={() => {
                         setSelected(a.title);
                         setView("activity");
+                        setHints([]);
+                        setError("");
+                        setCurrentPrompt(questionByTitle[a.title] || "");
                       }}
                     >
                       {a.status === "In progress" ? "Resume" : "Start"}
@@ -169,34 +260,80 @@ export default function App() {
               </button>
             </div>
 
+            {/* === NEW: dynamic prompt per assignment === */}
             <div className="mt-4 bg-gray-50 rounded-xl p-4">
               <p className="text-sm text-gray-700">
-                <span className="font-semibold">Prompt:</span> Write three
-                moments in the past week that made you feel energized or proud.
-                For each moment, add a short note on what skill you used (e.g.,
-                organizing, problem-solving, empathy).
+                <span className="font-semibold">Prompt:</span> {currentPrompt}
               </p>
             </div>
 
-            <textarea
-              className="mt-3 w-full h-40 border rounded-xl p-3 text-sm"
-              placeholder="Type your reflections here…"
-            ></textarea>
+            {/* === Special-case Micro-Network Task (no AI) === */}
+            {selected === "Micro-Network Task" ? (
+              <div className="mt-3 space-y-3">
+                <div className="border rounded-xl p-3 text-sm text-gray-700">
+                  Use the template below to send **one** informational-interview
+                  request. Paste your sent message or a screenshot as proof.
+                </div>
+                <div className="border rounded-xl p-3 text-sm">
+                  <div className="font-semibold mb-1">Template</div>
+                  <pre className="whitespace-pre-wrap text-xs">
+                    {`Subject: Quick 15-min chat about your role at [Company]?
 
-            <div className="mt-3 flex gap-2">
-              <button className="text-sm bg-gray-100 px-3 py-1 rounded-xl">
-                Get AI Hint
-              </button>
-              <button className="text-sm bg-gray-100 px-3 py-1 rounded-xl">
-                Insert Example
-              </button>
-              <button
-                className="ml-auto text-sm bg-blue-600 text-white px-4 py-1.5 rounded-xl"
-                onClick={() => setView("feedback")}
-              >
-                Submit for Review
-              </button>
-            </div>
+Hi [Name], I'm exploring [field/role] and noticed your experience with [topic]. 
+Would you be open to a quick 15-minute chat this week or next? 
+I'd love to learn how you got started and any advice for someone with [X background].
+Thanks so much! —[Your Name]`}
+                  </pre>
+                </div>
+                <div className="border rounded-xl p-3 text-sm text-gray-700">
+                  Upload your message/screenshot in “Attach Artifact”, then
+                  click “Submit for Review”.
+                </div>
+              </div>
+            ) : (
+              <>
+                <textarea
+                  className="mt-3 w-full h-40 border rounded-xl p-3 text-sm"
+                  placeholder="Type your reflections here…"
+                ></textarea>
+
+                <div className="mt-3 flex gap-2">
+                  <button
+                    className="text-sm bg-gray-100 px-3 py-1 rounded-xl"
+                    onClick={getAiHint}
+                    disabled={loading}
+                  >
+                    {loading ? "Thinking…" : "Get AI Hint"}
+                  </button>
+                  <button className="text-sm bg-gray-100 px-3 py-1 rounded-xl">
+                    Insert Example
+                  </button>
+                  <button
+                    className="ml-auto text-sm bg-blue-600 text-white px-4 py-1.5 rounded-xl"
+                    onClick={() => setView("feedback")}
+                  >
+                    Submit for Review
+                  </button>
+                </div>
+
+                {(error || hints.length > 0) && (
+                  <div className="mt-4 border rounded-xl p-3 bg-gray-50 text-sm">
+                    {error ? (
+                      <div className="text-red-600">Error: {error}</div>
+                    ) : (
+                      <>
+                        <div className="font-semibold mb-1">AI Hints</div>
+                        <ul className="list-disc list-inside space-y-1">
+                          {hints.map((h, i) => (
+                            <li key={i}>{h}</li>
+                          ))}
+                        </ul>
+                      </>
+                    )}
+                  </div>
+                )}
+              </>
+            )}
 
             <div className="mt-4">
               <h4 className="text-sm font-semibold mb-1">
